@@ -48,8 +48,8 @@
     canvas {
       border: 1px solid #ccc;
       display: block;
-      margin: 0 auto;
-      max-width: 100%;
+      margin: 20px auto;
+      max-width: 90%;
       height: auto;
       touch-action: none;
     }
@@ -88,47 +88,58 @@
     <input type="file" id="upload" accept="image/*" />
     <div id="loading">Loading image...</div>
     <div class="controls">
-      <button onclick="startDrawingLine()">Draw Line</button>
-      <button onclick="applyGradientCorrection()">Normalize Using Line</button>
+      <button id="drawLineBtn">Draw Line</button>
+      <button id="normalizeBtn">Normalize Using Line</button>
       <p>Click on two points to draw a line (tap on mobile).</p>
     </div>
-    <canvas id="canvas"></canvas>
+
+    <canvas id="originalCanvas"></canvas>
+    <canvas id="modifiedCanvas"></canvas> <!-- New canvas for the modified image -->
   </div>
 
   <script>
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+    const originalCanvas = document.getElementById('originalCanvas');
+    const modifiedCanvas = document.getElementById('modifiedCanvas');
+    const ctxOriginal = originalCanvas.getContext('2d');
+    const ctxModified = modifiedCanvas.getContext('2d');
     const loadingElement = document.getElementById('loading');
     const uploadInput = document.getElementById('upload');
+    const drawLineBtn = document.getElementById('drawLineBtn');
+    const normalizeBtn = document.getElementById('normalizeBtn');
+    
     let img = new Image();
     let points = [];
     let originalImageData = null;
     let scale = 1;
 
+    // Resize canvas to fit the image
     function resizeCanvasToFitImage() {
       const aspectRatio = img.width / img.height;
       const screenWidth = window.innerWidth * 0.9;
       const screenHeight = window.innerHeight * 0.6;
-      
+
       if (screenWidth / aspectRatio <= screenHeight) {
-        canvas.width = screenWidth;
-        canvas.height = screenWidth / aspectRatio;
+        originalCanvas.width = screenWidth;
+        originalCanvas.height = screenWidth / aspectRatio;
       } else {
-        canvas.height = screenHeight;
-        canvas.width = screenHeight * aspectRatio;
+        originalCanvas.height = screenHeight;
+        originalCanvas.width = screenHeight * aspectRatio;
       }
 
-      scale = canvas.width / img.width;
+      scale = originalCanvas.width / img.width;
+      modifiedCanvas.width = originalCanvas.width;  // Keep the modified canvas the same size
+      modifiedCanvas.height = originalCanvas.height;
     }
 
+    // Handle image upload
     uploadInput.addEventListener('change', (e) => {
       loadingElement.style.display = 'block';
       const reader = new FileReader();
       reader.onload = function(evt) {
         img.onload = () => {
           resizeCanvasToFitImage();
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          ctxOriginal.drawImage(img, 0, 0, originalCanvas.width, originalCanvas.height);
+          originalImageData = ctxOriginal.getImageData(0, 0, originalCanvas.width, originalCanvas.height);
           loadingElement.style.display = 'none';
         };
         img.src = evt.target.result;
@@ -136,8 +147,9 @@
       reader.readAsDataURL(e.target.files[0]);
     });
 
+    // Get the position of the mouse or touch event relative to the canvas
     function getPos(e) {
-      const rect = canvas.getBoundingClientRect();
+      const rect = originalCanvas.getBoundingClientRect();
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
       return { 
@@ -146,12 +158,14 @@
       };
     }
 
+    // Start drawing the line
     function startDrawingLine() {
       points = [];
-      canvas.addEventListener('mousedown', onClick);
-      canvas.addEventListener('touchstart', onClick);
+      originalCanvas.addEventListener('mousedown', onClick);
+      originalCanvas.addEventListener('touchstart', onClick);
     }
 
+    // Handle the click to mark points
     function onClick(e) {
       e.preventDefault();
       if (points.length < 2) {
@@ -161,39 +175,42 @@
       }
       if (points.length === 2) {
         drawLine(points[0], points[1]);
-        canvas.removeEventListener('mousedown', onClick);
-        canvas.removeEventListener('touchstart', onClick);
+        originalCanvas.removeEventListener('mousedown', onClick);
+        originalCanvas.removeEventListener('touchstart', onClick);
       }
     }
 
+    // Draw a point at the clicked position
     function drawPoint(point) {
-      ctx.beginPath();
-      ctx.arc(point.x * scale, point.y * scale, 5, 0, 2 * Math.PI);
-      ctx.fillStyle = "red";
-      ctx.fill();
+      ctxOriginal.beginPath();
+      ctxOriginal.arc(point.x * scale, point.y * scale, 5, 0, 2 * Math.PI);
+      ctxOriginal.fillStyle = "red";
+      ctxOriginal.fill();
     }
 
+    // Draw a line between two points
     function drawLine(p1, p2) {
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(p1.x * scale, p1.y * scale);
-      ctx.lineTo(p2.x * scale, p2.y * scale);
-      ctx.stroke();
+      ctxOriginal.strokeStyle = "red";
+      ctxOriginal.lineWidth = 2;
+      ctxOriginal.beginPath();
+      ctxOriginal.moveTo(p1.x * scale, p1.y * scale);
+      ctxOriginal.lineTo(p2.x * scale, p2.y * scale);
+      ctxOriginal.stroke();
     }
 
+    // Normalize the image using the drawn line
     function applyGradientCorrection() {
       if (points.length < 2) {
         alert("Please draw a line first.");
         return;
       }
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const imageData = ctxOriginal.getImageData(0, 0, originalCanvas.width, originalCanvas.height);
       const data = imageData.data;
 
       const linePoints = getLinePoints(points[0].x, points[0].y, points[1].x, points[1].y);
       const brightnessSamples = linePoints.map(({x, y}) => {
-        const idx = (Math.floor(y) * canvas.width + Math.floor(x)) * 4;
+        const idx = (Math.floor(y) * originalCanvas.width + Math.floor(x)) * 4;
         const r = data[idx], g = data[idx + 1], b = data[idx + 2];
         return (r + g + b) / 3;
       });
@@ -202,14 +219,14 @@
       const maxB = Math.max(...brightnessSamples);
       const normalized = brightnessSamples.map(b => (b - minB) / (maxB - minB + 1e-6));
 
-      const gradientMap = new Float32Array(canvas.width * canvas.height);
-      for (let y = 0; y < canvas.height; y++) {
-        for (let x = 0; x < canvas.width; x++) {
+      const gradientMap = new Float32Array(originalCanvas.width * originalCanvas.height);
+      for (let y = 0; y < originalCanvas.height; y++) {
+        for (let x = 0; x < originalCanvas.width; x++) {
           const t = getProjectionFactor({x, y}, points[0], points[1]);
           const clampedT = Math.max(0, Math.min(1, t));
           const idxOnLine = Math.floor(clampedT * (normalized.length - 1));
           const gradientValue = normalized[idxOnLine];
-          gradientMap[y * canvas.width + x] = gradientValue;
+          gradientMap[y * originalCanvas.width + x] = gradientValue;
         }
       }
 
@@ -223,10 +240,11 @@
         correctedData[i + 3] = data[i + 3];
       }
 
-      const correctedImage = new ImageData(correctedData, canvas.width, canvas.height);
-      ctx.putImageData(correctedImage, 0, 0);
+      const correctedImage = new ImageData(correctedData, originalCanvas.width, originalCanvas.height);
+      ctxModified.putImageData(correctedImage, 0, 0);  // Update the modified canvas
     }
 
+    // Calculate line points
     function getLinePoints(x0, y0, x1, y1) {
       const points = [];
       const dx = Math.abs(x1 - x0);
@@ -246,6 +264,7 @@
       return points;
     }
 
+    // Projection factor calculation for gradient mapping
     function getProjectionFactor(p, a, b) {
       const ap = { x: p.x - a.x, y: p.y - a.y };
       const ab = { x: b.x - a.x, y: b.y - a.y };
@@ -254,9 +273,18 @@
       return (ap.x * ab.x + ap.y * ab.y) / abLenSquared;
     }
     
+    // Clamp pixel values
     function clamp(val) {
       return Math.max(0, Math.min(255, val));
     }
+
+    // Prevent page reload behavior
+    normalizeBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      applyGradientCorrection();
+    });
+
+    drawLineBtn.addEventListener('click', startDrawingLine);
   </script>
 </body>
 </html>
